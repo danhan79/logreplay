@@ -1,0 +1,20 @@
+# .NET
+bin/
+obj/
+*.user
+.vs/
+
+# Node (in case the UI ever grows a build)
+node_modules/
+dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+*.swp
+
+# Claude Code local settings (per-user)
+.claude/settings.local.json
