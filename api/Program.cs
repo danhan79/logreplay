@@ -17,6 +17,11 @@ builder.Services.AddSingleton<IReadOnlyList<LogEntry>>(_ => MockData.Build());
 
 var app = builder.Build();
 
+var generatedLogs = app.Services.GetRequiredService<IReadOnlyList<LogEntry>>();
+app.Logger.LogInformation(
+    "Mock data ready: {Count:N0} log entries (seed=0x{Seed:x8}, target={N}/10s window)",
+    generatedLogs.Count, MockData.Seed, MockData.LogsPer10sWindow);
+
 app.UseCors();
 
 // GET /api/logs?from=...&to=...&q=...&severities=critical,error

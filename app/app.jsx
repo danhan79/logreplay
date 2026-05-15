@@ -11,6 +11,7 @@
 // =========================================================================
 
 const WINDOW_MS = 10_000; // size of one fetch unit
+const MAX_VISIBLE_LOGS = 1000; // cap DOM rows; drop oldest beyond this
 
 function App() {
   // Install API (mock by default).
@@ -95,6 +96,8 @@ function App() {
   }, []);
   const [playing, setPlaying] = React.useState(false);
   const [speed, setSpeed] = React.useState(1);
+  // Bumped to ask LogList to re-engage follow mode and snap to the tail.
+  const [followTick, bumpFollow] = React.useReducer(x => x + 1, 0);
 
   const [loading, setLoading] = React.useState(true);
   const [selected, setSelected] = React.useState(null);
@@ -177,11 +180,19 @@ function App() {
   // 1× = real wall-clock rate. Logs reveal at their natural pace because the
   // LogList is filtered to `timestamp <= at` (see visibleLogs below).
   const TICK_MS = 50;
+  // Carry sub-millisecond remainder across ticks so very low speeds (e.g.
+  // 0.01× = 0.5 ms/tick) still advance — `new Date(+prev + 0.5)` truncates
+  // the fraction and would otherwise leave `at` frozen.
+  const remainderRef = React.useRef(0);
   React.useEffect(() => {
     if (!playing) return;
+    remainderRef.current = 0;
     const id = setInterval(() => {
       setAt(prev => {
-        const next = +prev + TICK_MS * speed;
+        const delta = TICK_MS * speed + remainderRef.current;
+        const whole = Math.floor(delta);
+        remainderRef.current = delta - whole;
+        const next = +prev + whole;
         if (next > +to) { setPlaying(false); return to; }
         return new Date(next);
       });
@@ -206,9 +217,11 @@ function App() {
       const tag = (e.target.tagName || '').toLowerCase();
       if (tag === 'input' || tag === 'textarea') return;
       if (e.metaKey || e.ctrlKey || e.altKey) return; // don't hijack browser shortcuts
-      if (e.key === ' ') { e.preventDefault(); setPlaying(p => !p); }
+      if (e.key === ' ' && e.shiftKey) { e.preventDefault(); setAt(from); setPlaying(true); }
+      else if (e.key === ' ') { e.preventDefault(); setPlaying(p => !p); }
       else if (e.key === 'ArrowLeft')  setAt(a => new Date(Math.max(+from, +a - WINDOW_MS * (e.shiftKey ? 6 : 1))));
       else if (e.key === 'ArrowRight') setAt(a => new Date(Math.min(+to,   +a + WINDOW_MS * (e.shiftKey ? 6 : 1))));
+      else if (e.key === 'ArrowDown')  { e.preventDefault(); bumpFollow(); }
       else if (e.key === 'q' || e.key === 'Q') {
         // Tighten the window from the left (advance `from`). Shift = 10× step.
         const step = (e.shiftKey ? 10 : 1) * 60_000;
@@ -253,10 +266,12 @@ function App() {
   }, [version, severities, qBySeverity]);
 
   // Visible: stream up to the playhead. Severity is filtered server-side as
-  // part of the cache key, so no extra client filter is needed here.
+  // part of the cache key, so no extra client filter is needed here. Capped at
+  // MAX_VISIBLE_LOGS — older entries fall off so the DOM doesn't drown.
   const visibleLogs = React.useMemo(() => {
     const atMs = +at;
-    return stream.filter(l => +new Date(l.timestamp) <= atMs);
+    const filtered = stream.filter(l => +new Date(l.timestamp) <= atMs);
+    return filtered.length > MAX_VISIBLE_LOGS ? filtered.slice(-MAX_VISIBLE_LOGS) : filtered;
   }, [stream, at]);
 
   // Buffered window centers for the scrubber. Derived from cache, dedup'd
@@ -309,6 +324,8 @@ function App() {
           loading={loading}
           selectedId={selected ? selected.id : null}
           onSelect={handleSelect}
+          playing={playing}
+          followTick={followTick}
         />
         {selected && (
           <DetailDrawer

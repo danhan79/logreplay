@@ -26,7 +26,42 @@ const SEV_DOT = {
   verbose:  'debug',
 };
 
-function LogList({ logs, loading, selectedId, onSelect }) {
+function LogList({ logs, loading, selectedId, onSelect, playing, followTick }) {
+  const rowsRef = React.useRef(null);
+  // Auto-follow newest logs unless the user has scrolled up. Kept in a ref so
+  // toggling it doesn't re-render the list during playback.
+  const followingRef = React.useRef(true);
+
+  const handleScroll = React.useCallback(() => {
+    const el = rowsRef.current;
+    if (!el) return;
+    const distFromBottom = el.scrollHeight - el.clientHeight - el.scrollTop;
+    followingRef.current = distFromBottom <= 8;
+  }, []);
+
+  // Pressing play (or ArrowDown) re-engages follow mode and snaps to the tail,
+  // so the user doesn't sit watching the scrollbar shrink while the action
+  // happens below.
+  React.useEffect(() => {
+    if (!playing) return;
+    const el = rowsRef.current;
+    followingRef.current = true;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [playing]);
+
+  React.useEffect(() => {
+    if (!followTick) return;
+    const el = rowsRef.current;
+    followingRef.current = true;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [followTick]);
+
+  React.useLayoutEffect(() => {
+    const el = rowsRef.current;
+    if (!el || !followingRef.current) return;
+    el.scrollTop = el.scrollHeight;
+  }, [logs]);
+
   return (
     <div className="loglist">
       <div className="loglist-head">
@@ -36,7 +71,7 @@ function LogList({ logs, loading, selectedId, onSelect }) {
         <div>severity</div>
         <div>message</div>
       </div>
-      <div className="loglist-rows">
+      <div className="loglist-rows" ref={rowsRef} onScroll={handleScroll}>
         {loading && logs.length === 0 && <ShimmerRows count={14} />}
         {!loading && logs.length === 0 && (
           <div className="loglist-empty">

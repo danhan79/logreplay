@@ -5,7 +5,7 @@
 //   - hover tooltip showing target timestamp
 //   - drag to scrub, click to jump, play/pause + speed
 // =========================================================================
-const SPEEDS = [0.1, 0.2, 0.5, 1, 2, 4, 10];
+const SPEEDS = [0.01, 0.1, 0.2, 0.5, 1, 2, 4, 10];
 
 function Scrubber({
   rangeFrom, rangeTo, at, onAtChange,
@@ -214,7 +214,7 @@ function Scrubber({
               className={s === speed ? 'active' : ''}
               onClick={() => onSpeedChange(s)}
             >
-              {s < 1 ? s.toFixed(s < 0.5 ? 1 : 1) + 'x' : s + 'x'}
+              {s < 0.1 ? s.toFixed(2) + 'x' : s < 1 ? s.toFixed(1) + 'x' : s + 'x'}
             </button>
           ))}
         </div>

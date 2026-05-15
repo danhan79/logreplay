@@ -4,6 +4,24 @@ namespace LogReplay.Api;
 
 public static class MockData
 {
+    // Seed for the deterministic PRNG below. Same seed + same LogsPer10sWindow
+    // ⇒ byte-for-byte identical log stream across runs. Change the seed to get
+    // a different but still reproducible stream.
+    public const uint Seed = 0x9e3779b9;
+
+    // Average baseline density: how many logs the generator emits per 10s
+    // window (the same width the frontend fetches per request). Crank this up
+    // to stress-test the UI with production-shaped volumes — e.g.:
+    //     25   → ~40k logs across 4h30m (default, ~2.5 logs/s)
+    //    250   → ~400k logs           (~25 logs/s, busy service)
+    //   1000   → ~1.6M logs           (~100 logs/s, hot path under load)
+    // Scales the baseline noise + the post-incident aftermath. The 16 scripted
+    // incident logs (16:10–16:12) are not scaled — they're the storyline.
+    // Note: changing this value changes the random sequence consumed for
+    // service/severity picks, so the exact log content differs between values
+    // of N — but is still fully deterministic for any given (Seed, N) pair.
+    public const int LogsPer10sWindow = 10325;
+
     private static readonly string[] Services =
         { "gateway", "cart-svc", "pricing-svc", "checkout-svc", "auth-svc", "notif-svc" };
 
@@ -19,7 +37,12 @@ public static class MockData
         var incStartMs   = ToMs(incStart);
         var incEndMs     = ToMs(incEnd);
 
-        var rng = new Prng(0x9e3779b9);
+        // Average step between consecutive baseline logs. Using a double cursor
+        // so this stays correct when LogsPer10sWindow gets large enough that
+        // the average step is sub-millisecond (e.g. N=20000 ⇒ 0.5ms step).
+        double avgStepMs = 10_000.0 / LogsPer10sWindow;
+
+        var rng = new Prng(Seed);
         var all = new List<LogEntry>();
         int idCounter = 1;
 
@@ -39,12 +62,17 @@ public static class MockData
             );
 
         // -------- Baseline noise across the full 4h30m range ------------------
-        // Density: avg ~400ms between logs (~2.5/s, ~40k logs over the range).
+        // Density controlled by LogsPer10sWindow. Jitter keeps logs from
+        // landing on a perfectly even grid — step is uniform in [0.5x, 1.5x]
+        // of avgStepMs, so individual 10s windows fluctuate around the mean.
         // Distribution: each severity is well-represented so the UI's per-level
         // filters have plenty to chew on outside the incident block.
         //   critical  8%   error 17%   warn 20%   info 33%   verbose 22%
-        for (long t = rangeStartMs; t < rangeEndMs; t += 200 + (long)(rng.Next() * 400))
+        double tCursor = rangeStartMs;
+        while (tCursor < rangeEndMs)
         {
+            long t = (long)tCursor;
+            tCursor += avgStepMs * (0.5 + rng.Next());
             if (t >= incStartMs && t < incEndMs) continue;
             var svc = Services[(int)(rng.Next() * Services.Length)];
             var r = rng.Next();
@@ -114,8 +142,13 @@ public static class MockData
         all.Add(Inc(126_402, "info",     "pricing-svc", "cache.refill key=sku/3389 src=db (412ms)"));
 
         // -------- Aftermath: sustained 504s for ~3 minutes --------------------
-        for (long t = 130_000; t < 240_000; t += 250 + (long)(rng.Next() * 600))
+        // Same density scaling as the baseline so the aftermath stays
+        // proportional when LogsPer10sWindow is cranked up.
+        double aftermathCursor = 130_000;
+        while (aftermathCursor < 240_000)
         {
+            long t = (long)aftermathCursor;
+            aftermathCursor += avgStepMs * (0.5 + rng.Next());
             var r = rng.Next();
             if (r < 0.35)
             {
